@@ -1,12 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\EmailSender.Contracts\EmailSender.Contracts.csproj" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.3.0" />
+    <PackageReference Include="Scriban" Version="7.6.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="RabbitMQ.Client" Version="7.3.0" />
-    <PackageReference Include="Scriban" Version="7.6.1" />
+    <ProjectReference Include="..\EmailSender.Application\EmailSender.Application.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

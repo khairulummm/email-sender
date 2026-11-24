@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DataIntegration.Domain\DataIntegration.Domain.csproj" />
+    <ProjectReference Include="..\DataIntegration.Domain\EmailSender.Domain.csproj" />
   </ItemGroup>
 
 </Project>

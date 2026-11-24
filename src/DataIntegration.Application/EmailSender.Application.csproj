@@ -22,8 +22,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DataIntegration.Domain\DataIntegration.Domain.csproj" />
-    <ProjectReference Include="..\DataIntegration.Infrastructure\DataIntegration.Infrastructure.csproj" />
+    <ProjectReference Include="..\DataIntegration.Domain\EmailSender.Domain.csproj" />
+    <ProjectReference Include="..\DataIntegration.Infrastructure\EmailSender.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
