@@ -1,0 +1,182 @@
+stages:
+  - build
+  - publish
+  - cleanup
+
+variables:
+  GIT_DEPTH: 0
+  SRC_FOLDER: src
+  PROJECTS: "DataIntegration.Api:DataIntegration.Api.csproj:10201 DataIntegration.Worker:DataIntegration.Worker.csproj:10202"
+  WATCHTOWER_LABEL_ENABLE: "true"
+
+before_script:
+  - git fetch origin
+  - docker info
+
+.build_template: &build_template
+  stage: build
+  script:
+    - |
+      echo "Branch: $CI_COMMIT_REF_NAME"
+      echo "CI_PIPELINE_ID: $CI_PIPELINE_ID"
+
+      echo "===== Dockerfile snapshot ====="
+      cat Dockerfile
+
+      for entry in $PROJECTS; do
+        NAME=$(echo $entry | cut -d':' -f1)
+        CSPROJ=$(echo $entry | cut -d':' -f2)
+        PORT=$(echo $entry | cut -d':' -f3)
+
+        # BUILD_PROJECT=false
+
+        # if [ "$CI_COMMIT_REF_NAME" == "$CI_DEFAULT_BRANCH" ]; then
+          # echo ">>> Branch $CI_COMMIT_REF_NAME adalah default branch ($CI_DEFAULT_BRANCH), build $NAME"
+          # BUILD_PROJECT=true
+        # elif git diff --name-only origin/${CI_DEFAULT_BRANCH}...HEAD | grep -qE "^$SRC_FOLDER/$NAME/"; then
+          # echo ">>> Perubahan terdeteksi di $NAME"
+          # BUILD_PROJECT=true
+        # else
+          # echo ">>> Tidak ada perubahan di $NAME, skip build."
+        # fi
+        
+        # Sementara Semua Di-build Dulu
+        BUILD_PROJECT=true
+
+        if [ "$BUILD_PROJECT" = true ]; then
+          case "$CI_COMMIT_REF_NAME" in
+            master)
+              TAG="latest"
+              ENVIRONMENT="Production"
+              ;;
+            staging-*)
+              TAG="staging"
+              ENVIRONMENT="Development"
+              ;;
+            uat-*)
+              TAG="uat"
+              ENVIRONMENT="UAT"
+              ;;
+            sit-*)
+              TAG="sit"
+              ENVIRONMENT="SIT"
+              ;;
+            *)
+              echo "Branch tidak dikenali: $CI_COMMIT_REF_NAME"
+              continue
+              ;;
+          esac
+
+          LOWER_NAME=$(echo "$NAME" | sed 's/^DataIntegration\.//' | tr '[:upper:]' '[:lower:]')
+          IMAGE="registry.tower-bersama.com/production/hangfire-service/data-integration:${LOWER_NAME}.${TAG}"
+
+          if [ ! -f "$SRC_FOLDER/$NAME/$CSPROJ" ]; then
+            echo "❌ File project tidak ditemukan: $SRC_FOLDER/$NAME/$CSPROJ"
+            continue
+          fi
+          
+          echo ">>> Build $IMAGE dari $SRC_FOLDER/$NAME/$CSPROJ"
+
+          docker build \
+            --no-cache \
+            --pull \
+            --build-arg PROJECT_PATH="$SRC_FOLDER/$NAME/$CSPROJ" \
+            --build-arg PROJECT_DLL="$NAME.dll" \
+            --build-arg ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" \
+            --build-arg DOTNET_ENVIRONMENT="$ENVIRONMENT" \
+            --build-arg PORT="$PORT" \
+            --label build_id=$CI_PIPELINE_ID \
+            --label "WATCHTOWER_LABEL_ENABLE=$WATCHTOWER_LABEL_ENABLE" \
+            -t "$IMAGE" \
+            -f Dockerfile .
+
+          echo ">>> Inspecting built image: $IMAGE"
+          docker image inspect "$IMAGE" | grep -A 5 Entrypoint
+
+          cd "$CI_PROJECT_DIR"
+          touch "built-$LOWER_NAME"
+        fi
+      done
+
+build_all:
+  <<: *build_template
+  artifacts:
+    paths:
+      - built-*
+    expire_in: 1 hour
+  only:
+    - master
+    - staging-be
+    - uat-be
+    - sit-be
+
+publish_all:
+  stage: publish
+  dependencies:
+    - build_all
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - |
+      for entry in $PROJECTS; do
+        NAME=$(echo $entry | cut -d':' -f1)
+
+        case "$CI_COMMIT_REF_NAME" in
+          master) TAG="latest" ;;
+          staging-*) TAG="staging" ;;
+          uat-*) TAG="uat" ;;
+          sit-*) TAG="sit" ;;
+          *) echo "Branch tidak dikenali: $CI_COMMIT_REF_NAME"; continue ;;
+        esac
+
+        LOWER_NAME=$(echo "$NAME" | sed 's/^DataIntegration\.//' | tr '[:upper:]' '[:lower:]')
+        IMAGE="registry.tower-bersama.com/production/hangfire-service/data-integration:${LOWER_NAME}.${TAG}"
+
+        if [ -f "built-$LOWER_NAME" ]; then
+          echo ">>> Push $IMAGE"
+          if docker image inspect "$IMAGE" > /dev/null 2>&1; then
+            docker push "$IMAGE"
+          else
+            echo ">>> Image $IMAGE tidak ditemukan, skip push."
+          fi
+        else
+          echo ">>> $NAME tidak dibangun, skip push."
+        fi
+      done
+  only:
+    - master
+    - staging-be
+    - uat-be
+    - sit-be
+
+cleanup_all:
+  stage: cleanup
+  dependencies:
+    - build_all
+  script:
+    - |
+      for entry in $PROJECTS; do
+        NAME=$(echo $entry | cut -d':' -f1)
+
+        case "$CI_COMMIT_REF_NAME" in
+          master) TAG="latest" ;;
+          staging-*) TAG="staging" ;;
+          uat-*) TAG="uat" ;;
+          sit-*) TAG="sit" ;;
+          *) echo "Branch tidak dikenali: $CI_COMMIT_REF_NAME"; continue ;;
+        esac
+
+        LOWER_NAME=$(echo "$NAME" | sed 's/^DataIntegration\.//' | tr '[:upper:]' '[:lower:]')
+        IMAGE="registry.tower-bersama.com/production/hangfire-service/data-integration:${LOWER_NAME}.${TAG}"
+
+        if [ -f "built-$LOWER_NAME" ]; then
+          echo ">>> Cleanup image $IMAGE"
+          docker rmi "$IMAGE" || true
+          rm -f "built-$LOWER_NAME"
+        fi
+      done
+  only:
+    - master
+    - staging-be
+    - uat-be
+    - sit-be
+  when: always
